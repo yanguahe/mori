@@ -323,6 +323,14 @@ bitcode is processed by the same LLVM generation that compiled it.
 `tools/build_cco_bitcode.sh` accepts the same compiler settings; set
 `BUILD_CCO_SDMA=ON` when the host library includes SDMA support.
 
+For host-cloned sources built in a container where Git must stay on the host,
+initialize the required submodules on the host and export a NUL-separated source
+file list with `git ls-files --recurse-submodules -z`. Set
+`MORI_BUILD_SOURCE_FILES` to that shared file in the container, together with a
+host-resolved `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AMD_MORI`. The build then uses
+the host file list and `MANIFEST.in` instead of setuptools' Git file finder, and
+reports missing submodules without trying to fetch them in the container.
+
 ### Verify installation
 
 ```bash

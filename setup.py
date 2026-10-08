@@ -29,6 +29,8 @@ import shutil
 from setuptools import Extension, find_packages, setup
 from setuptools.command.build import build as _build
 from setuptools.command.build_ext import build_ext
+from setuptools.command.egg_info import egg_info as _egg_info, manifest_maker
+from setuptools.command.sdist import sdist
 
 try:
     from torch.utils.cpp_extension import CppExtension as _TorchCppExtension
@@ -527,6 +529,46 @@ def _write_rocm_build_info(root_dir: Path) -> None:
 _3RDPARTY_DIRS = ["3rdparty/spdlog", "3rdparty/msgpack-c"]
 
 
+class MoriEggInfo(_egg_info):
+    """Use an optional host-generated file list without invoking container Git."""
+
+    def find_sources(self) -> None:
+        source_manifest = os.environ.get("MORI_BUILD_SOURCE_FILES")
+        if not source_manifest:
+            return super().find_sources()
+
+        source_files = []
+        for name in Path(source_manifest).read_bytes().decode("utf-8").split("\0"):
+            if not name:
+                continue
+            path = Path(name)
+            if path.is_absolute() or ".." in path.parts:
+                raise RuntimeError(f"Invalid host source manifest path: {name}")
+            if path.is_file():
+                source_files.append(name)
+        if not source_files:
+            raise RuntimeError(f"Host source manifest has no files: {source_manifest}")
+
+        class HostManifestMaker(manifest_maker):
+            def add_defaults(self) -> None:
+                # Keep setuptools defaults and MANIFEST.in processing while
+                # replacing its VCS file finder with the host-owned file list.
+                sdist.add_defaults(self)
+                self.filelist.append(self.template)
+                self.filelist.append(self.manifest)
+                self.filelist.extend(source_files)
+                if os.path.exists("setup.py"):
+                    self.filelist.append("setup.py")
+                ei_cmd = self.get_finalized_command("egg_info")
+                self.filelist.graft(ei_cmd.egg_info)
+
+        maker = HostManifestMaker(self.distribution)
+        maker.ignore_egg_info_dir = self.ignore_egg_info_in_manifest
+        maker.manifest = os.path.join(self.egg_info, "SOURCES.txt")
+        maker.run()
+        self.filelist = maker.filelist
+
+
 def _ensure_3rdparty(root_dir: Path, extra_dirs: list[str] | None = None) -> None:
     """Ensure 3rdparty submodule directories exist via git submodule update.
 
@@ -542,6 +584,11 @@ def _ensure_3rdparty(root_dir: Path, extra_dirs: list[str] | None = None) -> Non
     ]
     if not missing:
         return
+    if os.environ.get("MORI_BUILD_SOURCE_FILES"):
+        raise RuntimeError(
+            f"Host-prepared third-party dependencies are missing: {missing}. "
+            "Run the required submodule update on the host before building."
+        )
 
     for d in missing:
         (root_dir / d).mkdir(parents=True, exist_ok=True)
@@ -1176,6 +1223,7 @@ setup(
     cmdclass={
         "build_ext": CMakeBuild,
         "build": CustomBuild,
+        "egg_info": MoriEggInfo,
     },
     ext_modules=extensions,
     include_package_data=True,
