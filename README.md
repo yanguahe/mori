@@ -292,6 +292,30 @@ To manually precompile all kernels (e.g. in a Docker image build):
 MORI_PRECOMPILE=1 python -c "import mori"
 ```
 
+#### LLVM build toolchain
+
+For a workspace containing `llvm-project/mlir_install`, source and editable
+installs automatically use that LLVM build for C, C++, HIP, and Python native
+extensions. This also works when the MORI source is in a nested workspace
+subdirectory. CMake receives explicit compiler paths and refreshes a cached
+configuration when those paths change.
+
+To select a different LLVM installation explicitly:
+
+```bash
+MORI_LLVM_PATH=/path/to/llvm/install pip install -e . --no-build-isolation
+```
+
+Compiler selection is `MORI_LLVM_PATH`, then a workspace
+`llvm-project/mlir_install`, then `HIP_CLANG_PATH`. If none is available, the
+existing system/ROCm compiler selection is retained. ROCm headers and runtime
+libraries still come from `ROCM_PATH`/`HIP_PATH`; `MORI_LLVM_PATH` selects the
+compiler installation, not the ROCm runtime.
+
+The selected LLVM installation must include its host `compiler-rt` builtins
+library, because ROCm's HIP CMake configuration links with
+`--rtlib=compiler-rt`. A compiler-only LLVM installation is insufficient.
+
 ### Verify installation
 
 ```bash

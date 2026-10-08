@@ -232,6 +232,56 @@ def _warn_umbp_disabled(missing: list, explicit: bool) -> None:
     print("\n".join(lines), file=sys.stderr)
 
 
+def _configure_llvm_toolchain(root_dir: Path) -> list[str]:
+    """Use the workspace LLVM build for CMake and Python native extensions.
+
+    MORI_LLVM_PATH overrides workspace discovery. HIP_CLANG_PATH is used when
+    no sibling llvm-project/mlir_install is present; otherwise the existing
+    compiler selection is retained.
+    """
+    llvm_path = os.environ.get("MORI_LLVM_PATH")
+    if llvm_path:
+        llvm_bin = Path(llvm_path).expanduser() / "bin"
+    else:
+        llvm_bin = next(
+            (
+                parent / "llvm-project" / "mlir_install" / "bin"
+                for parent in root_dir.resolve().parents
+                if (
+                    parent / "llvm-project" / "mlir_install" / "bin" / "clang"
+                ).is_file()
+                and (
+                    parent / "llvm-project" / "mlir_install" / "bin" / "clang++"
+                ).is_file()
+            ),
+            None,
+        )
+        if llvm_bin is None:
+            hip_clang_path = os.environ.get("HIP_CLANG_PATH")
+            if not hip_clang_path:
+                return []
+            llvm_bin = Path(hip_clang_path).expanduser()
+
+    llvm_bin = llvm_bin.absolute()
+    for name in ("clang", "clang++"):
+        compiler = llvm_bin / name
+        if not compiler.is_file() or not os.access(compiler, os.X_OK):
+            raise RuntimeError(
+                f"LLVM compiler is missing or not executable: {compiler}"
+            )
+
+    # distutils/Cython and torch extensions must use the same compiler as CMake.
+    os.environ["CC"] = str(llvm_bin / "clang")
+    os.environ["CXX"] = str(llvm_bin / "clang++")
+    os.environ["HIP_CLANG_PATH"] = str(llvm_bin)
+    print(f"[mori] Native build LLVM toolchain: {llvm_bin}")
+    return [
+        f"-DCMAKE_C_COMPILER={llvm_bin / 'clang'}",
+        f"-DCMAKE_CXX_COMPILER={llvm_bin / 'clang++'}",
+        f"-DCMAKE_HIP_COMPILER={llvm_bin / 'clang++'}",
+    ]
+
+
 def _invalidate_cmake_cache_if_changed(cmake_cache: "Path", cmake_args: list) -> None:
     """Clear CMake cache if any -DKEY=VALUE arg differs from the cached value."""
     if not cmake_cache.is_file():
@@ -531,6 +581,11 @@ def _setup_spdk(root_dir: Path) -> None:
 
 class CMakeBuild(build_ext):
     def run(self) -> None:
+        self._llvm_cmake_args = _configure_llvm_toolchain(Path(__file__).parent)
+        if self._llvm_cmake_args:
+            # Editable installs may reuse an in-place Cython extension compiled
+            # with another toolchain; rebuild native extensions with this LLVM.
+            self.force = True
         try:
             subprocess.check_output(["cmake", "--version"])
         except OSError as exn:
@@ -763,6 +818,8 @@ class CMakeBuild(build_ext):
             "-S",
             str(root_dir),
         ]
+
+        cmake_args.extend(self._llvm_cmake_args)
 
         if shutil.which("ninja"):
             cmake_args.insert(1, "-G")
