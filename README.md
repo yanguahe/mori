@@ -316,6 +316,13 @@ The selected LLVM installation must include its host `compiler-rt` builtins
 library, because ROCm's HIP CMake configuration links with
 `--rtlib=compiler-rt`. A compiler-only LLVM installation is insufficient.
 
+For runtime device compilation, `MORI_JIT_HIPCC` selects the HIP compiler
+wrapper for both the C++ EP JIT and the Python CCO/shmem JIT. `MORI_LLVM_PATH`
+(or `HIP_CLANG_PATH` when unset) also selects `opt` and `llvm-link`, so device
+bitcode is processed by the same LLVM generation that compiled it.
+`tools/build_cco_bitcode.sh` accepts the same compiler settings; set
+`BUILD_CCO_SDMA=ON` when the host library includes SDMA support.
+
 ### Verify installation
 
 ```bash

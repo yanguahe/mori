@@ -85,9 +85,23 @@ echo "[cco] NIC: ${NIC_TYPE^^}  (cov=${COV})"
 # ---------------------------------------------------------------------------
 # Compile wrapper to device bitcode
 # ---------------------------------------------------------------------------
-HIPCC="${ROCM_PATH}/bin/hipcc"
-LLVM_LINK="${ROCM_PATH}/lib/llvm/bin/llvm-link"
-OPT="${ROCM_PATH}/lib/llvm/bin/opt"
+HIPCC="${MORI_JIT_HIPCC:-${ROCM_PATH}/bin/hipcc}"
+if [ -n "${MORI_LLVM_PATH:-}" ]; then
+    export HIP_CLANG_PATH="${MORI_LLVM_PATH}/bin"
+fi
+if [ -n "${HIP_CLANG_PATH:-}" ]; then
+    OPT="${HIP_CLANG_PATH}/opt"
+else
+    OPT="${ROCM_PATH}/lib/llvm/bin/opt"
+fi
+[ -x "$HIPCC" ] || { echo "Error: hipcc not executable: $HIPCC" >&2; exit 1; }
+[ -x "$OPT" ] || { echo "Error: opt not executable: $OPT" >&2; exit 1; }
+
+# Keep device SDMA symbols consistent with the host build when explicitly enabled.
+case "${BUILD_CCO_SDMA:-OFF}" in
+    1|ON|on|TRUE|true|YES|yes) SDMA_DEFINE="-DBUILD_CCO_SDMA=1" ;;
+    *) SDMA_DEFINE="-DBUILD_CCO_SDMA=0" ;;
+esac
 
 WRAPPER_SRC="${MORI_DIR}/src/cco/device/cco_device_wrapper.cpp"
 [ -f "$WRAPPER_SRC" ] || { echo "Error: not found: $WRAPPER_SRC"; exit 1; }
@@ -101,19 +115,19 @@ INCLUDES="-I${MORI_DIR} -I${MORI_DIR}/include -I${MORI_DIR}/src"
 MPI_INC=$(mpicc --showme:compile 2>/dev/null | grep -oP '(?<=-I)\S+' | head -1 || true)
 [ -n "$MPI_INC" ] && INCLUDES="$INCLUDES -I${MPI_INC}"
 
-COMMON_FLAGS="--cuda-device-only -emit-llvm --offload-arch=${GPU_ARCH} -fgpu-rdc -mcode-object-version=${COV} -std=c++17 -O2 -D__HIP_PLATFORM_AMD__ -DHIP_ENABLE_WARP_SYNC_BUILTINS ${NIC_DEFINES}"
+COMMON_FLAGS="--cuda-device-only -emit-llvm --offload-arch=${GPU_ARCH} -fgpu-rdc -mcode-object-version=${COV} -std=c++17 -O2 -D__HIP_PLATFORM_AMD__ -DHIP_ENABLE_WARP_SYNC_BUILTINS ${NIC_DEFINES} ${SDMA_DEFINE}"
 
 echo "[cco] Compiling wrapper ..."
-$HIPCC -c $COMMON_FLAGS $INCLUDES "$WRAPPER_SRC" -o "$TEMP_DIR/wrapper.bc"
+"$HIPCC" -c $COMMON_FLAGS $INCLUDES "$WRAPPER_SRC" -o "$TEMP_DIR/wrapper.bc"
 
 echo "[cco] Stripping llvm.lifetime intrinsics ..."
-$OPT -S "$TEMP_DIR/wrapper.bc" -o "$TEMP_DIR/wrapper.ll"
+"$OPT" -S "$TEMP_DIR/wrapper.bc" -o "$TEMP_DIR/wrapper.ll"
 sed -i '/llvm\.lifetime\./d' "$TEMP_DIR/wrapper.ll"
-$OPT "$TEMP_DIR/wrapper.ll" -o "$TEMP_DIR/libmori_cco_device.bc"
+"$OPT" "$TEMP_DIR/wrapper.ll" -o "$TEMP_DIR/libmori_cco_device.bc"
 
 echo "[cco] Verifying symbols ..."
-$OPT -S "$TEMP_DIR/libmori_cco_device.bc" -o "$TEMP_DIR/verify.ll"
-for sym in cco_gda_put cco_gda_signal cco_gda_wait_signal cco_devcomm_rank; do
+"$OPT" -S "$TEMP_DIR/libmori_cco_device.bc" -o "$TEMP_DIR/verify.ll"
+for sym in cco_gda_put__it__none cco_gda_signal__thread__inc cco_gda_wait_signal__thread cco_devcomm_rank; do
     if grep -q "@${sym}\b" "$TEMP_DIR/verify.ll"; then
         echo "[cco] ✓ ${sym}"
     else

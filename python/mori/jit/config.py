@@ -105,7 +105,25 @@ def detect_wave_size() -> int:
 
 
 def _find_tool(rocm_path: str, name: str) -> str:
-    """Locate a ROCm LLVM tool, raising FileNotFoundError if missing."""
+    """Use the selected LLVM toolchain before falling back to ROCm tools."""
+    llvm_path = os.environ.get("MORI_LLVM_PATH")
+    llvm_bin = (
+        Path(llvm_path).expanduser() / "bin"
+        if llvm_path
+        else (
+            Path(os.environ["HIP_CLANG_PATH"]).expanduser()
+            if os.environ.get("HIP_CLANG_PATH")
+            else None
+        )
+    )
+    if llvm_bin is not None:
+        tool = llvm_bin / name
+        if tool.is_file() and os.access(tool, os.X_OK):
+            return str(tool)
+        raise FileNotFoundError(
+            f"{name} missing from the selected LLVM toolchain: {tool}"
+        )
+
     candidates = [
         os.path.join(rocm_path, "lib", "llvm", "bin", name),
         os.path.join(rocm_path, "bin", name),
@@ -292,8 +310,8 @@ def detect_build_config() -> BuildConfig:
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
     arch = detect_gpu_arch(rocm_path)
-    hipcc = os.path.join(rocm_path, "bin", "hipcc")
-    if not os.path.isfile(hipcc):
+    hipcc = os.environ.get("MORI_JIT_HIPCC") or os.path.join(rocm_path, "bin", "hipcc")
+    if not os.path.isfile(hipcc) or not os.access(hipcc, os.X_OK):
         raise FileNotFoundError(f"hipcc not found at {hipcc}")
 
     _cached_config = BuildConfig(
