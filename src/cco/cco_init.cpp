@@ -657,6 +657,11 @@ static int ccoCommCreateImpl(application::BootstrapNetwork* bootNet, size_t perR
     }
     if (comm->handleType != static_cast<int>(hipMemHandleTypeFabricCompat)) {
       MORI_SHMEM_INFO("ccoCommCreate: fabric handle probe failed, using FD path");
+      if (probeErr != hipSuccess) {
+        // Unsupported fabric handles are an expected probe failure. Consume
+        // the probe's sticky last-error before subsequent torch operations.
+        (void)hipGetLastError();
+      }
     }
   }
 

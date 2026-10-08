@@ -158,7 +158,7 @@ __device__ __forceinline__ void TdmIssueLoad(T* ldsTile, const T* src,
   if constexpr (SCOPE != 0) g0.m_scope_trait = SCOPE;
   _tdm_v4i z4{0, 0, 0, 0};
   _tdm_v8i z8{0, 0, 0, 0, 0, 0, 0, 0};
-  __builtin_amdgcn_tensor_load_to_lds(g0.m_bitfield, g1.m_bitfield, z4, z4, z8, 0);
+  __builtin_amdgcn_tensor_load_to_lds(g0.m_bitfield, (_tdm_v8i)g1.m_bitfield, z4, z4, z8, 0);
   TdmSeparateFromBranch();
 }
 template <typename T>
@@ -186,7 +186,7 @@ __device__ __forceinline__ void TdmIssueStore(T* dst, T* ldsTile, const gfx1250_
   if constexpr (SCOPE != 0) g0.m_scope_trait = SCOPE;
   _tdm_v4i z4{0, 0, 0, 0};
   _tdm_v8i z8{0, 0, 0, 0, 0, 0, 0, 0};
-  __builtin_amdgcn_tensor_store_from_lds(g0.m_bitfield, g1.m_bitfield, z4, z4, z8, CPOL);
+  __builtin_amdgcn_tensor_store_from_lds(g0.m_bitfield, (_tdm_v8i)g1.m_bitfield, z4, z4, z8, CPOL);
   TdmSeparateFromBranch();
 }
 __device__ __forceinline__ gfx1250_TDM_GROUP1 TdmShape2D(int dim0, int dim1) {
